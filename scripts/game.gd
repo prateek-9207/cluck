@@ -90,7 +90,7 @@ func _ready():
 	make_audio()
 	show_home()
 	if "--capture" in OS.get_cmdline_user_args(): capture_frames.call_deferred()
-	if test_mode:
+	if test_mode and not "--capture" in OS.get_cmdline_user_args():
 		start_run(0)
 		if "--smoke" in OS.get_cmdline_user_args(): run_smoke.call_deferred()
 
@@ -198,7 +198,7 @@ func clear_overlay():
 	overlay.visible = true; stick.enabled = false; stick.release()
 
 func panel(title: String, subtitle: String) -> VBoxContainer:
-	clear_overlay()
+	clear_overlay(); hud.visible=false
 	var shade = ColorRect.new(); shade.color = Color(.04,.10,.08,.74); shade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT); overlay.add_child(shade)
 	var margin = MarginContainer.new(); overlay.add_child(margin); margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	margin.add_theme_constant_override("margin_left",28); margin.add_theme_constant_override("margin_right",28); margin.add_theme_constant_override("margin_top",48); margin.add_theme_constant_override("margin_bottom",34)
@@ -522,7 +522,7 @@ func apply_upgrade(option):
 			"haste": cooldown_scale*=.92
 
 func resume_run():
-	mode="playing"; overlay.visible=false; stick.enabled=true; stick.release()
+	mode="playing"; overlay.visible=false; hud.visible=true; stick.enabled=true; stick.release()
 
 func show_pause():
 	if mode!="playing": return
@@ -636,14 +636,24 @@ func run_smoke():
 func capture_frames():
 	await get_tree().process_frame
 	await RenderingServer.frame_post_draw
-	get_viewport().get_texture().get_image().save_png("res://builds/menu.png")
+	get_viewport().get_texture().get_image().save_png(capture_dir()+"/menu.png")
 	start_run(0)
-	for i in range(30): spawn_enemy(i%2)
+	weapons=[2,2,1,0]; rank=5; elapsed=45
+	for i in range(26):
+		spawn_enemy(i%2)
+		var angle=i*TAU/26
+		enemies.back().node.position=hero.position+Vector3(sin(angle),0,cos(angle))*rng.randf_range(4,8)
 	for i in range(90): await get_tree().process_frame
 	mode="capture"
 	await RenderingServer.frame_post_draw
-	get_viewport().get_texture().get_image().save_png("res://builds/combat.png")
-	print("CAPTURE_DONE hero=",hero.global_position," cam=",cam.global_position," model=",hero_model.get_children())
+	get_viewport().get_texture().get_image().save_png(capture_dir()+"/combat.png")
+	show_upgrades()
+	await RenderingServer.frame_post_draw
+	get_viewport().get_texture().get_image().save_png(capture_dir()+"/upgrades.png")
+	progress.data.coins=100; show_shop()
+	await RenderingServer.frame_post_draw
+	get_viewport().get_texture().get_image().save_png(capture_dir()+"/shop.png")
+	print("CAPTURE_DONE")
 	get_tree().quit()
 
 func batch_scenery(parent: Node3D):
@@ -662,3 +672,6 @@ func batch_scenery(parent: Node3D):
 			mm.set_instance_transform(i,parent.global_transform.affine_inverse()*node.global_transform)
 			node.visible=false
 		var instance=MultiMeshInstance3D.new(); instance.multimesh=mm; parent.add_child(instance)
+
+func capture_dir() -> String:
+	return "user:/" if OS.has_feature("android") else "res://builds"
