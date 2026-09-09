@@ -19,3 +19,9 @@
 - Physical Android hardware, thermal behaviour and low-end phone performance have not been tested.
 
 Tests use `cluck_test_save.json`, separate from normal player progress. Run `tests/run_tests.sh` with Godot installed. Set `GODOT_BIN` when its executable is elsewhere.
+
+## v0.2.0 regression checks
+
+Focused tests cover the enlarged bounds, ranged initial equipment, migration of old saves without losing coins or ownership, automatic grenade unlock, grenade flight and damage to multiple enemies, and a complete 38-enemy horde with a warning before arrival. Existing combat, purchase, saving, touch and pause tests remain included. The earlier emulator results apply to v0.1.0; v0.2.0 is re-exported and signature-verified but has not had another emulator playthrough.
+
+The v0.2.0 full-campaign rerun completed levels 1 and 2, but did not confirm completion of level 3 within the test budget. Final-level completion/balance and manual verification of the enlarged Mac window remain outstanding. The release is marked prerelease pending that follow-up.

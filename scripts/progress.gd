@@ -11,7 +11,7 @@ func _init(save_path: String = "user://cluck_save.json"):
 	load_save()
 
 func reset():
-	data = {"version": 1, "coins": 0, "unlocked": 1, "equipped": 0, "owned": [0], "health": 0, "power": 0, "magnet": 0, "best": [0, 0, 0], "music": true, "sound": true}
+	data = {"version": 2, "coins": 0, "unlocked": 1, "equipped": 0, "owned": [0], "health": 0, "power": 0, "magnet": 0, "best": [0, 0, 0], "music": true, "sound": true}
 
 func load_save():
 	if not FileAccess.file_exists(path): return
@@ -27,6 +27,8 @@ func load_save():
 	if not 0 in data.owned: data.owned.append(0)
 	data.equipped = int(data.equipped)
 	if not data.equipped in data.owned: data.equipped = 0
+	if int(parsed.get("version",1))<2:
+		data.equipped=0; data.version=2; save()
 	if not data.best is Array or data.best.size() != 3: data.best = [0, 0, 0]
 
 func save():

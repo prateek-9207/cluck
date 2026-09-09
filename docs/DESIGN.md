@@ -16,7 +16,7 @@ Bosses arrive 30 seconds before the nominal end. Defeating the boss ends the lev
 
 Drag below the top HUD to move. The floating joystick follows the first finger and releases when that finger lifts. WASD, arrows and mouse dragging also work. Attacks target automatically. Escape or Android Back pauses; returning to the farm preserves earned coins. Losing app focus pauses combat.
 
-Blue experience gems grant levels. Each level pauses combat and offers up to three eligible upgrades. Four attacks have five ranks each: Egg Shot, Feather Ring, Peck Sweep and Eggsplosion. Five passive upgrades have four ranks each: damage, movement, maximum health, pickup range and attack speed. A full build receives healing choices. Run upgrades reset on the next attempt.
+Blue experience gems grant levels. Each level pauses combat and offers up to three eligible upgrades. Four attacks have five ranks each: Egg Shot, Feather Ring, Peck Sweep and Egg Grenade. Five passive upgrades have four ranks each: damage, movement, maximum health, pickup range and attack speed. A full build receives healing choices. Run upgrades reset on the next attempt.
 
 Health pickups appear every 28 kills. A magnet appears every 65 kills and attracts all existing pickups. Boars and bosses display a red ring before a committed charge.
 
@@ -36,6 +36,14 @@ The economy intentionally allows meaningful purchases after a short attempt and 
 
 ## Implementation
 
-Godot 4.7.2, GDScript, OpenGL compatibility renderer. Blender exports original GLB assets; Godot animates movement with procedural body bob, lean and facing. Static repeated scenery is batched with MultiMesh. Enemy, projectile, pickup and combat-effect nodes are reused. Active enemies are capped at 110; excess experience pickups merge their value rather than losing it.
+Godot 4.7.2, GDScript, OpenGL compatibility renderer. Blender exports original GLB assets; Godot animates movement with procedural body bob, lean and facing. Static repeated scenery is batched with MultiMesh. Enemy, projectile, pickup and combat-effect nodes are reused. Ordinary spawns stop at 110 active enemies; alerted hordes can raise the total to 160; excess experience pickups merge their value rather than losing it.
 
 The source Blender file is in `art/cluck_assets.blend`; the generation scripts are in `art/`. Godot ignores that folder and uses the exported GLBs, so opening the game project does not require Blender to reimport it.
+
+## v0.2.0 revisions
+
+- The field measures 68 × 76 game units (previously 17 × 28), about 11 times the playable area. Scenery stays beyond the fences.
+- New saves start with ranged Egg Shot. Existing v1 saves switch to Egg Shot once, preserving coins, stats and owned weapons. Players can still deliberately equip other owned weapons.
+- The Mac window starts large and centered, using up to 90% of available screen height, capped at 1600 pixels.
+- At player levels 4, 7, 10 and every third level thereafter, a three-second incoming alert precedes a horde of 38–60 animals. This is additional to regular enemy spawning. The warning and arrival pause during upgrade selection.
+- Egg Grenade unlocks automatically at player level 3. It auto-throws a visible grenade in an arc, then damages every enemy in its blast radius. Upgrade choices increase its damage and blast size.

@@ -6,8 +6,10 @@ const LEVELS = [
 	{"name":"THE FARMYARD", "sub":"A small bird. A very big problem.", "time":240.0, "boss":"THE RAT KING", "kind":0},
 	{"name":"CORNFIELD CHAOS", "sub":"Something is moving in the corn.", "time":300.0, "boss":"OLD TUSK", "kind":2},
 	{"name":"THE LAST BARN", "sub":"Make your final stand.", "time":360.0, "boss":"THE MOODON", "kind":3}]
+const ARENA_X = 34.0
+const ARENA_Z = 38.0
 const TYPES = ["rat", "fox", "boar", "cow"]
-const ATTACKS = ["Egg Shot", "Feather Ring", "Peck Sweep", "Eggsplosion"]
+const ATTACKS = ["Egg Shot", "Feather Ring", "Peck Sweep", "Egg Grenade"]
 const INK = Color("233b32")
 const CREAM = Color("fff0ce")
 const GOLD = Color("efb84f")
@@ -37,6 +39,10 @@ var models: Dictionary = {}
 var pools: Dictionary = {}
 var enemies: Array = []
 var shots: Array = []
+var grenades: Array = []
+var horde_pending = 0
+var horde_wait = -1.0
+var horde_active = false
 var gems: Array = []
 var effects: Array = []
 var rng = RandomNumberGenerator.new()
@@ -81,10 +87,17 @@ func _ready():
 	test_mode = "--smoke" in OS.get_cmdline_user_args() or "--campaign-test" in OS.get_cmdline_user_args() or "--capture" in OS.get_cmdline_user_args()
 	if test_mode: progress = Progress.new("user://cluck_test_save.json"); progress.reset()
 	autofarm = "--campaign-test" in OS.get_cmdline_user_args()
+	if autofarm: seed(82026)
 	for asset_name in TYPES + ["chicken","barn","hay","tree","fence","corn"]:
 		models[asset_name] = load("res://assets/models/" + asset_name + ".glb")
 	sphere_mesh = SphereMesh.new(); sphere_mesh.radius = .16; sphere_mesh.height = .32; sphere_mesh.radial_segments = 10; sphere_mesh.rings = 5
 	gem_mesh = PrismMesh.new(); gem_mesh.size = Vector3(.19,.32,.19)
+	if OS.get_name()=="macOS" and not test_mode:
+		var available=DisplayServer.screen_get_usable_rect()
+		var height=mini(1600,int(available.size.y*.9))
+		var window_size=Vector2i(int(height*9.0/16.0),height)
+		DisplayServer.window_set_size(window_size)
+		DisplayServer.window_set_position(available.position+(available.size-window_size)/2)
 	make_world()
 	make_ui()
 	make_audio()
@@ -122,29 +135,18 @@ func make_world():
 	env.environment.tonemap_mode = Environment.TONE_MAPPER_FILMIC
 	add_child(env)
 	var sun = DirectionalLight3D.new(); sun.rotation_degrees = Vector3(-53,-25,0); sun.light_color = Color("fff2de"); sun.light_energy = .8; sun.shadow_enabled = true; sun.directional_shadow_max_distance = 60; add_child(sun)
-	cube(world,Vector3(0,-.2,0),Vector3(70,.35,70),Color("788a4b"))
-	# Softly varied tiles make the farm floor legible without noisy textures.
-	for x in range(-14,15,2):
-		for z in range(-17,18,2):
-			var c = Color("887449") if abs(x)<5 or abs(z)<3 else Color("586a38")
-			c = c.lightened(rng.randf_range(-.025,.025))
-			cube(world,Vector3(x,-.02,z),Vector3(2,.025,2),c)
+	# A broad open field; scenery stays outside the movement boundary.
+	cube(world,Vector3(0,-.2,0),Vector3(100,.35,110),Color("586a38"))
+	for x in range(-36,37,6):
+		for z in range(-42,43,6):
+			var c=Color("887449") if abs(x)<6 or abs(z)<6 else Color("586a38")
+			cube(world,Vector3(x,-.02,z),Vector3(6,.025,6),c.lightened(rng.randf_range(-.018,.018)))
 	for side in [-1,1]:
-		for z in range(-17,18,2): model("fence",world,Vector3(side*13.8,0,z)).rotation.y = PI/2
-		for x in range(-12,13,2): model("fence",world,Vector3(x,0,side*18.5))
-	model("barn",world,Vector3(0,0,-22),1.8)
-	for side in [-1,1]:
-		for z in range(-23,25,5):
-			model("tree",world,Vector3(side*rng.randf_range(16,19),0,z),rng.randf_range(1,1.7))
-		for z in [-13,-6,8,15]:
-			model("hay",world,Vector3(side*12.3,0,z),1.0)
-		for x in range(8,13):
-			for z in range(-16,18,3): model("corn",world,Vector3(side*x,0,z),rng.randf_range(.65,.9))
-	for i in range(80):
-		var p = Vector3(rng.randf_range(-13,13),.025,rng.randf_range(-18,18))
-		if abs(p.x) > 5: cube(world,p,Vector3(.12,.09,.2),Color("afad61"))
+		for z in range(-38,39,4): model("fence",world,Vector3(side*35.5,0,z),1.8).rotation.y=PI/2
+		for x in range(-34,35,4): model("fence",world,Vector3(x,0,side*39.5),1.8)
+		for z in [-34,-16,16,34]: model("tree",world,Vector3(side*40,0,z),1.5)
+	model("barn",world,Vector3(0,0,-44),1.8)
 	batch_scenery(world)
-	world.scale = Vector3(.68,1,.8)
 	hero = Node3D.new(); actors.add_child(hero); hero_model = model("chicken",hero,Vector3.ZERO,.8)
 	cam = Camera3D.new(); cam.projection = Camera3D.PROJECTION_ORTHOGONAL; cam.size = 21; cam.near = .1; cam.far = 100; add_child(cam); cam.current = true
 	update_camera(1.0)
@@ -260,6 +262,7 @@ func start_run(index: int):
 	xp = 0; rank = 1; xp_need = 7; kills = 0; run_coins = 0; saved_run_coins = 0; bank_cd = 0
 	weapons = [0,0,0,0]; weapons[int(progress.data.equipped)] = 1; weapon_cd = [0.0,0.0,0.0,0.0]
 	passives = {"power":0,"speed":0,"health":0,"magnet":0,"haste":0}
+	horde_pending=0; horde_wait=-1; horde_active=false
 	invuln = 1; spawn_cd = .6; wave = 0; boss_spawned = false; boss_defeated = false
 	hero.position = Vector3(0,0,-5); configure_level(); hero_model.visible = true; mode = "playing"; hud.visible = true; overlay.visible = false; stick.enabled = true; stick.queue_redraw()
 	boss_bar.visible = false; boss_label.text = ""; announce("%s\nDrag to move · attacks are automatic" % LEVELS[level].name,4)
@@ -267,18 +270,16 @@ func start_run(index: int):
 
 func configure_level():
 	for child in level_decor.get_children(): child.queue_free()
-	if level == 1:
+	# Level landmarks sit beyond the fence, leaving the whole field traversable.
+	if level==1:
 		for side in [-1,1]:
-			for z in range(-12,13,2):
-				for x in [4.6,5.2]: model("corn",level_decor,Vector3(side*x,0,z),1.3)
-	elif level == 2:
-		for side in [-1,1]:
-			model("barn",level_decor,Vector3(side*11,0,0),1.4).rotation.y=side*PI/2
-			for z in [-10,-4,4,10]: model("hay",level_decor,Vector3(side*8,0,z),1.1)
+			for z in range(-36,37,6): model("corn",level_decor,Vector3(side*37,0,z),1.4)
+	elif level==2:
+		for side in [-1,1]: model("barn",level_decor,Vector3(side*40,0,0),1.6).rotation.y=side*PI/2
 	batch_scenery(level_decor)
 
 func clear_combat():
-	for list in [enemies,shots,gems,effects]:
+	for list in [enemies,shots,grenades,gems,effects]:
 		for e in list: recycle(e.node)
 		list.clear()
 
@@ -294,15 +295,15 @@ func acquire(kind: String) -> Node3D:
 func recycle(n: Node3D):
 	n.visible = false; pools[n.get_meta("pool")].append(n)
 
-func spawn_enemy(kind: int, boss = false):
-	if enemies.size() >= 110 and not boss: return
+func spawn_enemy(kind: int, boss = false, horde = false):
+	if enemies.size() >= (160 if horde else 110) and not boss: return
 	var n = acquire(TYPES[kind]); var angle = rng.randf()*TAU
 	n.position = hero.position + Vector3(sin(angle),0,cos(angle))*rng.randf_range(9,12)
-	n.position.x = clampf(n.position.x,-8.5,8.5); n.position.z = clampf(n.position.z,-14,14)
-	if n.position.distance_to(hero.position)<7: n.position = Vector3(-8 if hero.position.x>0 else 8,0,-13 if hero.position.z>0 else 13)
+	n.position.x = clampf(n.position.x,-ARENA_X,ARENA_X); n.position.z = clampf(n.position.z,-ARENA_Z,ARENA_Z)
+	if n.position.distance_to(hero.position)<7: n.position=hero.position+Vector3(-9 if hero.position.x>0 else 9,0,0)
 	var health = [10.0,18.0,48.0,80.0][kind] * (1 + level*.25 + elapsed/900)
 	if boss: health = [320.0,520.0,800.0][level]; n.scale *= 2.1
-	enemies.append({"node":n,"kind":kind,"hp":health,"max":health,"speed":(3.4 if boss else [1.6,2.7,1.8,1.2][kind]+level*.13),"radius":1.2 if boss else .45,"boss":boss,"attack":rng.randf_range(2,5),"warn":0.0,"charge":0.0,"dir":Vector3.ZERO,"flash":0.0,"phase":rng.randf()*TAU})
+	enemies.append({"node":n,"kind":kind,"hp":health,"max":health,"speed":(4.4 if boss else [1.6,2.7,1.8,1.2][kind]+level*.13),"radius":1.2 if boss else .45,"boss":boss,"attack":rng.randf_range(2,5),"warn":0.0,"charge":0.0,"dir":Vector3.ZERO,"flash":0.0,"phase":rng.randf()*TAU})
 	if boss: boss_bar.max_value = health; boss_bar.value = health; boss_bar.visible = true; boss_label.text = LEVELS[level].boss; announce("%s\nINCOMING!" % LEVELS[level].boss,3); sfx("boss")
 
 func _process(dt):
@@ -317,7 +318,7 @@ func _process(dt):
 		movement = Vector2(cos(elapsed*.18),sin(elapsed*.18))
 		hp = max_hp
 	var move3 = Vector3(movement.x,0,movement.y)
-	hero.position += move3*speed*dt; hero.position.x = clampf(hero.position.x,-8.5,8.5); hero.position.z = clampf(hero.position.z,-14,14)
+	hero.position += move3*speed*dt; hero.position.x = clampf(hero.position.x,-ARENA_X,ARENA_X); hero.position.z = clampf(hero.position.z,-ARENA_Z,ARENA_Z)
 	if move3.length()>.1: facing = move3.normalized(); hero_model.rotation.y = lerp_angle(hero_model.rotation.y,atan2(facing.x,facing.z),dt*14)
 	hero_model.position.y = abs(sin(elapsed*14))*.12*movement.length()
 	hero_model.rotation.z = sin(elapsed*14)*.065*movement.length()
@@ -333,17 +334,18 @@ func _process(dt):
 			if level>=1 and elapsed>40 and r>.8: kind = 2
 			if level>=2 and elapsed>65 and r>.9: kind = 3
 			spawn_enemy(kind)
+	update_horde(dt)
 	var current_wave = int(elapsed/30)+1
 	if current_wave > wave:
 		wave = current_wave
-		if wave > 1: announce("WAVE %02d  /  KEEP CLUCKING" % wave,2)
+		if wave > 1 and not horde_active: announce("WAVE %02d  /  KEEP CLUCKING" % wave,2)
 	if elapsed >= LEVELS[level].time-30 and not boss_spawned: boss_spawned = true; spawn_enemy(LEVELS[level].kind,true)
 	for i in range(4):
 		weapon_cd[i] -= dt
 		if weapons[i]>0 and weapon_cd[i]<=0: fire_weapon(i)
 	update_enemies(dt)
 	if mode != "playing": return
-	update_shots(dt); update_gems(dt); update_effects(dt)
+	update_shots(dt); update_grenades(dt); update_gems(dt); update_effects(dt)
 	bank_cd += dt
 	if bank_cd>5: bank_coins(); bank_cd=0
 	update_hud()
@@ -365,7 +367,7 @@ func update_enemies(dt):
 			# A stable lateral offset stops every enemy collapsing into one point.
 			var lateral = Vector3(-dir.z,0,dir.x) * sin(e.phase+elapsed*.8)*.35
 			n.position += (dir+lateral)*e.speed*dt
-		n.position.x = clampf(n.position.x,-8.8,8.8); n.position.z = clampf(n.position.z,-14,14)
+		n.position.x = clampf(n.position.x,-ARENA_X,ARENA_X); n.position.z = clampf(n.position.z,-ARENA_Z,ARENA_Z)
 		n.rotation.y = atan2(dir.x,dir.z); n.position.y = abs(sin(elapsed*10+e.phase))*.065
 		n.rotation.z = sin(elapsed*10+e.phase)*.035
 		if to_player.length() < e.radius+.45 and invuln<=0:
@@ -381,6 +383,7 @@ func closest_enemy():
 	for e in enemies:
 		if e.hp<=0: continue
 		var d = e.node.position.distance_squared_to(hero.position)
+		if e.boss and d<169: return e
 		if d < distance: distance = d; result = e
 	return result
 
@@ -410,10 +413,40 @@ func fire_weapon(kind: int):
 		sfx("sweep",.35)
 	else:
 		if target == null: return
-		var pos: Vector3 = target.node.position; var radius = 2.1+lv*.2; ring(pos,radius,Color("f39743"),.5); particle(pos,GOLD,Vector3.ONE*1.8,.35)
-		for e in enemies:
-			if e.node.position.distance_to(pos)<radius: hit(e,(28+lv*12)*damage_scale)
-		sfx("boom",.5)
+		var n=acquire("grenade"); n.position=hero.position+Vector3(0,.8,0)
+		n.scale=Vector3.ONE*1.9; n.material_override=mat(Color("41552d"))
+		grenades.append({"node":n,"from":n.position,"to":target.node.position,"time":0.0,"damage":(28+lv*12)*damage_scale,"radius":2.5+lv*.25})
+
+func update_grenades(dt):
+	for i in range(grenades.size()-1,-1,-1):
+		var g=grenades[i]; g.time+=dt
+		var t=minf(1,g.time/.7)
+		g.node.position=g.from.lerp(g.to,t)+Vector3(0,sin(t*PI)*3,0)
+		g.node.rotation.z+=dt*8
+		if t>=1:
+			ring(g.to,g.radius,Color("f39743"),.6); particle(g.to+Vector3(0,.5,0),GOLD,Vector3.ONE*2,.35)
+			for e in enemies:
+				if e.node.position.distance_to(g.to)<g.radius+e.radius: hit(e,g.damage)
+			sfx("boom",.5); recycle(g.node); grenades.remove_at(i)
+
+func queue_rank_rewards():
+	if rank==3 and weapons[3]==0: weapons[3]=1
+	if rank>=4 and (rank-4)%3==0:
+		horde_pending+=mini(60,30+rank*2)
+
+func update_horde(dt):
+	if horde_pending<=0: return
+	if not horde_active:
+		horde_active=true; horde_wait=3.0
+		announce("BIG HORDE INCOMING!\nGet ready · 3 seconds",3.0); sfx("boss"); return
+	horde_wait-=dt
+	if horde_wait>0: return
+	var count=mini(8,mini(horde_pending,160-enemies.size()))
+	for i in range(count): spawn_enemy(1 if rng.randf()>.75 else 0,false,true)
+	horde_pending-=count; horde_wait=.15
+	if horde_pending==0:
+		horde_active=false; horde_wait=-1
+		announce("THE HORDE IS HERE!",2)
 
 func hit(e, amount):
 	if e.hp<=0: return
@@ -464,6 +497,7 @@ func update_gems(dt):
 			recycle(g.node); gems.remove_at(i)
 	if xp>=xp_need:
 		xp-=xp_need; rank+=1; xp_need = 7+rank*4
+		queue_rank_rewards()
 		show_upgrades()
 
 func particle(pos: Vector3, color: Color, dims: Vector3, life: float):
@@ -488,7 +522,7 @@ func update_effects(dt):
 func upgrade_options() -> Array:
 	var options: Array = []
 	for i in range(4):
-		if weapons[i]<5: options.append({"type":"weapon","id":i,"title":ATTACKS[i],"desc":["Auto-fired eggs. More damage and extra shots.","Orbiting feathers damage nearby enemies.","A wide sweep pushes back the crowd.","Exploding eggs blast a cluster of enemies."][i],"level":weapons[i]+1})
+		if weapons[i]<5: options.append({"type":"weapon","id":i,"title":ATTACKS[i],"desc":["Auto-fired eggs. More damage and extra shots.","Orbiting feathers damage nearby enemies.","A wide sweep pushes back the crowd.","Automatically lob grenades. Blast every enemy in the area."][i],"level":weapons[i]+1})
 	for key in passives:
 		if passives[key]<4:
 			var details = {"power":["FIGHTING SPIRIT","+15% damage for all weapons."],"speed":["QUICK FEET","Move 8% faster."],"health":["SECOND WIND","+20 max health. Heal 35 health."],"magnet":["FEED FINDER","Collect gems from farther away."],"haste":["EARLY BIRD","All weapons attack 8% faster."]}[key]
@@ -500,7 +534,7 @@ func show_upgrades():
 	var options = upgrade_options()
 	if autofarm: apply_upgrade(options[0]); return
 	mode="upgrade"; sfx("level")
-	var col = panel("LOOK WHO'S\nGROWING.","LEVEL %d  /  Choose one upgrade for this run." % rank)
+	var col = panel("LOOK WHO'S\nGROWING.",("LEVEL 3  /  Egg Grenade unlocked! It fires automatically.\nChoose another upgrade." if rank==3 else "LEVEL %d  /  Choose one upgrade for this run." % rank))
 	for option in options:
 		var card = PanelContainer.new(); card.add_theme_stylebox_override("panel",style(Color("2b483b"),Color("647750"))); col.add_child(card)
 		var box = VBoxContainer.new(); box.add_theme_constant_override("separation",8); card.add_child(box)
@@ -557,6 +591,7 @@ func finish_run(won: bool):
 	sfx("win" if won else "lose")
 
 func announce(message: String, seconds: float):
+	if horde_active and horde_wait>0 and not message.begins_with("BIG HORDE"): return
 	notice.text=message; notice_time=seconds
 
 func update_hud():
@@ -603,11 +638,29 @@ func sfx(sound_name: String, volume=1.0):
 
 func run_smoke():
 	await get_tree().process_frame
+	var old_save=Progress.new("user://cluck_migration_test.json"); old_save.reset()
+	old_save.data.version=1; old_save.data.equipped=1; old_save.data.owned=[0,1]; old_save.data.coins=77; old_save.save()
+	var migrated=Progress.new(old_save.path)
+	assert(migrated.data.equipped==0 and migrated.data.coins==77 and 1 in migrated.data.owned,"Migration must restore ranged default without losing purchases")
+	assert(progress.data.equipped==0 and weapons[0]==1,"New games must start ranged")
+	assert(ARENA_X*ARENA_Z/(8.5*14)>10,"Arena must be substantially larger")
+	rank=3; queue_rank_rewards(); assert(weapons[3]==1,"Grenade must unlock at level 3")
+	spawn_enemy(0); spawn_enemy(0)
+	for e in enemies: e.node.position=hero.position+Vector3(2,0,0)
+	fire_weapon(3); assert(grenades.size()==1,"Grenade must be visibly thrown")
+	update_grenades(.8); assert(enemies[0].hp<=0 and enemies[1].hp<=0,"Grenade must damage multiple enemies")
+	clear_combat(); rank=4; queue_rank_rewards(); update_horde(.1)
+	assert(enemies.is_empty() and horde_wait==3,"Horde must warn before spawning")
+	update_horde(3.1); assert(enemies.size()==8,"Horde must arrive after warning")
+	for i in range(8): update_horde(.2)
+	assert(enemies.size()==38 and horde_pending==0,"Whole horde must spawn")
+	start_run(0)
 	# Exercise the real run lifecycle, purchases, save roundtrip, and all attacks.
 	for i in range(4): spawn_enemy(i)
 	weapons=[3,3,3,3]
 	for e in enemies: e.node.position=hero.position+Vector3(1,0,0)
 	for i in range(4): fire_weapon(i)
+	update_grenades(.8)
 	await get_tree().process_frame
 	assert(kills>0,"Weapons should defeat enemies")
 	run_coins=200; finish_run(false)

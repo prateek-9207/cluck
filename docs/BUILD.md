@@ -2,7 +2,7 @@
 
 ## Ready-to-play builds
 
-Download the APK or Mac ZIP from this repository's v0.1.0 release. The repository is private, so sign into the owner's GitHub account to download.
+Download the APK or Mac ZIP from this repository's v0.2.0 release. The repository is private, so sign into the owner's GitHub account to download.
 
 - Android: copy `cluck.apk` to an Android phone and open it to install. This is a development-signed APK, intended for direct testing, not a Play Store release. No account, network permission, ads or payments are required.
 - Mac: unzip `Cluck-macOS.zip`, then open `Cluck.app`. This local build is ad-hoc signed and is not Apple-notarized.

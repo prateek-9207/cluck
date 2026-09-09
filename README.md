@@ -2,13 +2,15 @@
 
 **Small bird. Big problems.** A playable, portrait 3D farm survival game built with Godot and original Blender assets.
 
-[Download Android and Mac builds](https://github.com/prateek-9207/cluck/releases/tag/v0.1.0) · [Build instructions](docs/BUILD.md) · [Design](docs/DESIGN.md) · [Validation](docs/VALIDATION.md)
+[Download Android and Mac builds](https://github.com/prateek-9207/cluck/releases/tag/v0.2.0) · [Build instructions](docs/BUILD.md) · [Design](docs/DESIGN.md) · [Validation](docs/VALIDATION.md)
 
 ## Play
 
 Three patches provide approximately 15 minutes of combat content: The Farmyard, Cornfield Chaos, and The Last Barn. Dodge rats, foxes, charging boars and tough cows, then defeat each patch's boss.
 
-- One-thumb movement and automatic attacks.
+- A large, simple field, one-thumb movement and automatic attacks.
+- Alerted enemy hordes every three player levels, starting at level 4.
+- Auto-fired grenades unlock at level 3 and blast groups of enemies.
 - Four attacks and five types of temporary upgrades.
 - Coins retained after attempts, including defeats.
 - Permanent stat upgrades and three selectable starting weapons.
