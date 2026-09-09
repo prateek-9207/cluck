@@ -13,6 +13,7 @@ const CREAM = Color("fff0ce")
 const GOLD = Color("efb84f")
 const RED = Color("d65a42")
 var progress = Progress.new()
+var level_decor: Node3D
 var world: Node3D
 var actors: Node3D
 var hero: Node3D
@@ -76,21 +77,22 @@ var gem_mesh: PrismMesh
 var materials: Dictionary = {}
 
 func _ready():
-	rng.randomize()
-	test_mode = "--smoke" in OS.get_cmdline_user_args() or "--campaign-test" in OS.get_cmdline_user_args()
+	rng.seed = 82026 if "--campaign-test" in OS.get_cmdline_user_args() else Time.get_ticks_usec()
+	test_mode = "--smoke" in OS.get_cmdline_user_args() or "--campaign-test" in OS.get_cmdline_user_args() or "--capture" in OS.get_cmdline_user_args()
 	if test_mode: progress = Progress.new("user://cluck_test_save.json"); progress.reset()
 	autofarm = "--campaign-test" in OS.get_cmdline_user_args()
-	for name in TYPES + ["chicken","barn","hay","tree","fence","corn"]:
-		models[name] = load("res://assets/models/" + name + ".glb")
+	for asset_name in TYPES + ["chicken","barn","hay","tree","fence","corn"]:
+		models[asset_name] = load("res://assets/models/" + asset_name + ".glb")
 	sphere_mesh = SphereMesh.new(); sphere_mesh.radius = .16; sphere_mesh.height = .32; sphere_mesh.radial_segments = 10; sphere_mesh.rings = 5
 	gem_mesh = PrismMesh.new(); gem_mesh.size = Vector3(.19,.32,.19)
 	make_world()
 	make_ui()
 	make_audio()
 	show_home()
+	if "--capture" in OS.get_cmdline_user_args(): capture_frames.call_deferred()
 	if test_mode:
 		start_run(0)
-		if not autofarm: run_smoke.call_deferred()
+		if "--smoke" in OS.get_cmdline_user_args(): run_smoke.call_deferred()
 
 func mat(color: Color, glow = false) -> StandardMaterial3D:
 	var key = str(color) + str(glow)
@@ -103,8 +105,8 @@ func cube(parent, pos, dims, color):
 	var n = MeshInstance3D.new(); var mesh = BoxMesh.new(); mesh.size = dims; n.mesh = mesh
 	n.material_override = mat(color); parent.add_child(n); n.position = pos; return n
 
-func model(name: String, parent: Node3D, pos: Vector3, scale_value = 1.0) -> Node3D:
-	var n = models[name].instantiate(); parent.add_child(n); n.position = pos; n.scale = Vector3.ONE * scale_value
+func model(asset_name: String, parent: Node3D, pos: Vector3, scale_value = 1.0) -> Node3D:
+	var n = models[asset_name].instantiate(); parent.add_child(n); n.position = pos; n.scale = Vector3.ONE * scale_value
 	# Ignore any unselected object included by Blender's cross-scene export context.
 	for child in n.get_children():
 		if child.name == "Cube": child.visible = false
@@ -112,18 +114,20 @@ func model(name: String, parent: Node3D, pos: Vector3, scale_value = 1.0) -> Nod
 
 func make_world():
 	world = Node3D.new(); add_child(world)
+	level_decor = Node3D.new(); add_child(level_decor)
 	actors = Node3D.new(); add_child(actors)
 	var env = WorldEnvironment.new(); env.environment = Environment.new()
 	env.environment.background_mode = Environment.BG_COLOR; env.environment.background_color = Color("728c76")
-	env.environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR; env.environment.ambient_light_color = Color("ffe7b0"); env.environment.ambient_light_energy = .65
+	env.environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR; env.environment.ambient_light_color = Color("d1deeb"); env.environment.ambient_light_energy = .3
+	env.environment.tonemap_mode = Environment.TONE_MAPPER_FILMIC
 	add_child(env)
-	var sun = DirectionalLight3D.new(); sun.rotation_degrees = Vector3(-53,-25,0); sun.light_color = Color("ffe2ad"); sun.light_energy = 1.25; sun.shadow_enabled = true; sun.directional_shadow_max_distance = 60; add_child(sun)
+	var sun = DirectionalLight3D.new(); sun.rotation_degrees = Vector3(-53,-25,0); sun.light_color = Color("fff2de"); sun.light_energy = .8; sun.shadow_enabled = true; sun.directional_shadow_max_distance = 60; add_child(sun)
 	cube(world,Vector3(0,-.2,0),Vector3(70,.35,70),Color("788a4b"))
 	# Softly varied tiles make the farm floor legible without noisy textures.
 	for x in range(-14,15,2):
 		for z in range(-17,18,2):
-			var c = Color("b59b66") if abs(x)<5 or abs(z)<3 else Color("839353")
-			c = c.lightened(rng.randf_range(-.07,.05))
+			var c = Color("887449") if abs(x)<5 or abs(z)<3 else Color("586a38")
+			c = c.lightened(rng.randf_range(-.025,.025))
 			cube(world,Vector3(x,-.02,z),Vector3(2,.025,2),c)
 	for side in [-1,1]:
 		for z in range(-17,18,2): model("fence",world,Vector3(side*13.8,0,z)).rotation.y = PI/2
@@ -139,14 +143,16 @@ func make_world():
 	for i in range(80):
 		var p = Vector3(rng.randf_range(-13,13),.025,rng.randf_range(-18,18))
 		if abs(p.x) > 5: cube(world,p,Vector3(.12,.09,.2),Color("afad61"))
+	batch_scenery(world)
+	world.scale = Vector3(.68,1,.8)
 	hero = Node3D.new(); actors.add_child(hero); hero_model = model("chicken",hero,Vector3.ZERO,.8)
-	cam = Camera3D.new(); cam.projection = Camera3D.PROJECTION_ORTHOGONAL; cam.size = 20; cam.near = .1; cam.far = 100; add_child(cam); cam.current = true
+	cam = Camera3D.new(); cam.projection = Camera3D.PROJECTION_ORTHOGONAL; cam.size = 21; cam.near = .1; cam.far = 100; add_child(cam); cam.current = true
 	update_camera(1.0)
 
 func update_camera(dt):
-	var target = hero.position + Vector3(0,19,14)
+	var target = hero.position + Vector3(0,18,18)
 	cam.position = cam.position.lerp(target, minf(1,dt*7))
-	cam.look_at(cam.position - Vector3(0,19,14),Vector3.UP)
+	cam.look_at(cam.position - Vector3(0,18,18),Vector3.UP)
 	if shake > 0 and not test_mode: cam.h_offset = rng.randf_range(-shake,shake); cam.v_offset = rng.randf_range(-shake,shake)
 	else: cam.h_offset = 0; cam.v_offset = 0
 
@@ -184,7 +190,7 @@ func make_ui():
 	var bc = VBoxContainer.new(); hud.add_child(bc); bc.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE); bc.offset_top = 173; bc.offset_left = 40; bc.offset_right = -40
 	boss_label = text_label(bc,"",20,GOLD); boss_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	boss_bar = ProgressBar.new(); bc.add_child(boss_bar); boss_bar.show_percentage = false; boss_bar.custom_minimum_size.y = 12; boss_bar.add_theme_stylebox_override("fill",style(RED)); boss_bar.visible = false
-	notice = text_label(hud,"",24,GOLD); notice.set_anchors_and_offsets_preset(Control.PRESET_CENTER); notice.offset_left = -245; notice.offset_right = 245; notice.offset_top = -190; notice.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	notice = text_label(hud,"",24,CREAM); notice.add_theme_color_override("font_shadow_color",INK); notice.add_theme_constant_override("shadow_offset_x",2); notice.add_theme_constant_override("shadow_offset_y",2); notice.set_anchors_and_offsets_preset(Control.PRESET_CENTER); notice.offset_left = -245; notice.offset_right = 245; notice.offset_top = -190; notice.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	overlay = Control.new(); ui.add_child(overlay); overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
 func clear_overlay():
@@ -206,7 +212,8 @@ func panel(title: String, subtitle: String) -> VBoxContainer:
 
 func show_home():
 	mode = "menu"; hud.visible = false; hero.position = Vector3.ZERO; hero_model.rotation.y = -.3
-	var col = panel("SMALL BIRD.\nBIG PROBLEMS.","Your farm. Your fight. One more run.")
+	var col = panel("CLUCK", "SMALL BIRD. BIG PROBLEMS.")
+	var portrait = TextureRect.new(); portrait.texture=load("res://icon.svg"); portrait.custom_minimum_size=Vector2(120,120); portrait.expand_mode=TextureRect.EXPAND_IGNORE_SIZE; portrait.stretch_mode=TextureRect.STRETCH_KEEP_ASPECT_CENTERED; col.add_child(portrait)
 	text_label(col,"◈  %d COINS" % progress.data.coins,26,GOLD)
 	text_label(col,"CHOOSE YOUR PATCH",15,Color("b3c3a4"))
 	for i in range(3):
@@ -254,9 +261,21 @@ func start_run(index: int):
 	weapons = [0,0,0,0]; weapons[int(progress.data.equipped)] = 1; weapon_cd = [0.0,0.0,0.0,0.0]
 	passives = {"power":0,"speed":0,"health":0,"magnet":0,"haste":0}
 	invuln = 1; spawn_cd = .6; wave = 0; boss_spawned = false; boss_defeated = false
-	hero.position = Vector3.ZERO; hero_model.visible = true; mode = "playing"; hud.visible = true; overlay.visible = false; stick.enabled = true
+	hero.position = Vector3(0,0,-5); configure_level(); hero_model.visible = true; mode = "playing"; hud.visible = true; overlay.visible = false; stick.enabled = true; stick.queue_redraw()
 	boss_bar.visible = false; boss_label.text = ""; announce("%s\nDrag to move · attacks are automatic" % LEVELS[level].name,4)
 	update_hud()
+
+func configure_level():
+	for child in level_decor.get_children(): child.queue_free()
+	if level == 1:
+		for side in [-1,1]:
+			for z in range(-12,13,2):
+				for x in [4.6,5.2]: model("corn",level_decor,Vector3(side*x,0,z),1.3)
+	elif level == 2:
+		for side in [-1,1]:
+			model("barn",level_decor,Vector3(side*11,0,0),1.4).rotation.y=side*PI/2
+			for z in [-10,-4,4,10]: model("hay",level_decor,Vector3(side*8,0,z),1.1)
+	batch_scenery(level_decor)
 
 func clear_combat():
 	for list in [enemies,shots,gems,effects]:
@@ -269,7 +288,7 @@ func acquire(kind: String) -> Node3D:
 	if pools[kind].size() > 0: n = pools[kind].pop_back()
 	elif kind in TYPES: n = model(kind,actors,Vector3.ZERO)
 	else:
-		n = MeshInstance3D.new(); n.mesh = gem_mesh if kind == "gem" else sphere_mesh; actors.add_child(n)
+		n = MeshInstance3D.new(); n.mesh = gem_mesh as Mesh if kind == "gem" else sphere_mesh as Mesh; actors.add_child(n)
 	n.set_meta("pool",kind); n.visible = true; n.scale = Vector3.ONE; n.rotation = Vector3.ZERO; return n
 
 func recycle(n: Node3D):
@@ -278,12 +297,12 @@ func recycle(n: Node3D):
 func spawn_enemy(kind: int, boss = false):
 	if enemies.size() >= 110 and not boss: return
 	var n = acquire(TYPES[kind]); var angle = rng.randf()*TAU
-	n.position = hero.position + Vector3(sin(angle),0,cos(angle))*rng.randf_range(12,16)
-	n.position.x = clampf(n.position.x,-13,13); n.position.z = clampf(n.position.z,-18,18)
-	if n.position.distance_to(hero.position)<7: n.position = Vector3(-10 if hero.position.x>0 else 10,0,-14 if hero.position.z>0 else 14)
+	n.position = hero.position + Vector3(sin(angle),0,cos(angle))*rng.randf_range(9,12)
+	n.position.x = clampf(n.position.x,-8.5,8.5); n.position.z = clampf(n.position.z,-14,14)
+	if n.position.distance_to(hero.position)<7: n.position = Vector3(-8 if hero.position.x>0 else 8,0,-13 if hero.position.z>0 else 13)
 	var health = [10.0,18.0,48.0,80.0][kind] * (1 + level*.25 + elapsed/900)
-	if boss: health = [750.0,1200.0,1800.0][level]; n.scale *= 2.1
-	enemies.append({"node":n,"kind":kind,"hp":health,"max":health,"speed":[1.6,2.7,1.8,1.2][kind]+level*.13,"radius":1.2 if boss else .45,"boss":boss,"attack":rng.randf_range(2,5),"warn":0.0,"charge":0.0,"dir":Vector3.ZERO,"flash":0.0,"phase":rng.randf()*TAU})
+	if boss: health = [320.0,520.0,800.0][level]; n.scale *= 2.1
+	enemies.append({"node":n,"kind":kind,"hp":health,"max":health,"speed":(3.4 if boss else [1.6,2.7,1.8,1.2][kind]+level*.13),"radius":1.2 if boss else .45,"boss":boss,"attack":rng.randf_range(2,5),"warn":0.0,"charge":0.0,"dir":Vector3.ZERO,"flash":0.0,"phase":rng.randf()*TAU})
 	if boss: boss_bar.max_value = health; boss_bar.value = health; boss_bar.visible = true; boss_label.text = LEVELS[level].boss; announce("%s\nINCOMING!" % LEVELS[level].boss,3); sfx("boss")
 
 func _process(dt):
@@ -298,8 +317,8 @@ func _process(dt):
 		movement = Vector2(cos(elapsed*.18),sin(elapsed*.18))
 		hp = max_hp
 	var move3 = Vector3(movement.x,0,movement.y)
-	hero.position += move3*speed*dt; hero.position.x = clampf(hero.position.x,-13,13); hero.position.z = clampf(hero.position.z,-17.5,17.5)
-	if move3.length()>.1: facing = move3.normalized(); hero_model.rotation.y = lerp_angle(hero_model.rotation.y,atan2(-facing.x,-facing.z),dt*14)
+	hero.position += move3*speed*dt; hero.position.x = clampf(hero.position.x,-8.5,8.5); hero.position.z = clampf(hero.position.z,-14,14)
+	if move3.length()>.1: facing = move3.normalized(); hero_model.rotation.y = lerp_angle(hero_model.rotation.y,atan2(facing.x,facing.z),dt*14)
 	hero_model.position.y = abs(sin(elapsed*14))*.12*movement.length()
 	hero_model.rotation.z = sin(elapsed*14)*.065*movement.length()
 	hero_model.visible = invuln<=0 or int(invuln*12)%2==0
@@ -346,8 +365,8 @@ func update_enemies(dt):
 			# A stable lateral offset stops every enemy collapsing into one point.
 			var lateral = Vector3(-dir.z,0,dir.x) * sin(e.phase+elapsed*.8)*.35
 			n.position += (dir+lateral)*e.speed*dt
-		n.position.x = clampf(n.position.x,-13.5,13.5); n.position.z = clampf(n.position.z,-18,18)
-		n.rotation.y = atan2(-dir.x,-dir.z); n.position.y = abs(sin(elapsed*10+e.phase))*.065
+		n.position.x = clampf(n.position.x,-8.8,8.8); n.position.z = clampf(n.position.z,-14,14)
+		n.rotation.y = atan2(dir.x,dir.z); n.position.y = abs(sin(elapsed*10+e.phase))*.065
 		n.rotation.z = sin(elapsed*10+e.phase)*.035
 		if to_player.length() < e.radius+.45 and invuln<=0:
 			hp -= (20 if e.boss else [9,12,17,20][e.kind]); invuln = .75; shake=.18; sfx("hurt"); ring(hero.position,.7,RED,.3)
@@ -526,7 +545,7 @@ func finish_run(won: bool):
 		else: print("CAMPAIGN_TEST_PASS"); get_tree().quit()
 		return
 	var col=panel("PATCH PROTECTED!" if won else "DOWN. NOT OUT.","%s  /  %s" % [LEVELS[level].name,"Victory!" if won else "Your earned coins are safe."])
-	text_label(col,"%02d:%02d SURVIVED\n%d ENEMIES DEFEATED\nLEVEL %d REACHED" % [int(elapsed)/60,int(elapsed)%60,kills,rank],27)
+	text_label(col,"%02d:%02d SURVIVED\n%d ENEMIES DEFEATED\nLEVEL %d REACHED" % [int(elapsed/60),int(elapsed)%60,kills,rank],27)
 	text_label(col,"+%d COINS" % (run_coins+bonus),42,GOLD)
 	text_label(col,"%d earned in combat + %d completion bonus" % [run_coins,bonus],17)
 	if won and level==2:
@@ -542,7 +561,7 @@ func announce(message: String, seconds: float):
 
 func update_hud():
 	var remaining = maxi(0,int(LEVELS[level].time-elapsed))
-	title_label.text = "%02d:%02d   /   WAVE %02d" % [remaining/60,remaining%60,maxi(1,wave)]
+	title_label.text = "%02d:%02d   /   WAVE %02d" % [int(remaining/60.0),remaining%60,maxi(1,wave)]
 	hp_bar.max_value=max_hp; hp_bar.value=hp; xp_bar.max_value=xp_need; xp_bar.value=xp
 	info_label.text="HP %d/%d    LV %d    ◈ %d    KILLS %d" % [maxi(0,int(hp)),int(max_hp),rank,run_coins,kills]
 	var equipped: Array[String]=[]
@@ -556,6 +575,11 @@ func _unhandled_input(event):
 		elif mode=="pause": resume_run()
 
 func _notification(what):
+	if what==NOTIFICATION_WM_GO_BACK_REQUEST:
+		if mode=="playing": show_pause()
+		elif mode=="pause": resume_run()
+		elif mode in ["shop","results"]: clear_combat(); show_home()
+		elif mode=="menu": get_tree().quit()
 	if what==NOTIFICATION_APPLICATION_FOCUS_OUT:
 		if mode=="playing": show_pause()
 		if is_instance_valid(hero): bank_coins()
@@ -571,11 +595,11 @@ func update_audio():
 	if progress.data.music and not test_mode: music.play()
 	else: music.stop()
 
-func sfx(name: String, volume=1.0):
+func sfx(sound_name: String, volume=1.0):
 	if not progress.data.sound or test_mode: return
 	for p in sounds:
 		if not p.playing:
-			p.stream=load("res://assets/audio/"+name+".wav"); p.volume_db=linear_to_db(volume*.45); p.pitch_scale=rng.randf_range(.94,1.06); p.play(); return
+			p.stream=load("res://assets/audio/"+sound_name+".wav"); p.volume_db=linear_to_db(volume*.45); p.pitch_scale=rng.randf_range(.94,1.06); p.play(); return
 
 func run_smoke():
 	await get_tree().process_frame
@@ -590,11 +614,51 @@ func run_smoke():
 	assert(progress.data.coins==200,"Failed attempts retain coins once")
 	finish_run(false); assert(progress.data.coins==200,"Duplicate result does not duplicate reward")
 	assert(progress.buy_weapon(1)); assert(progress.buy_stat("health"))
+	assert(not progress.buy_weapon(2),"Unaffordable weapons must not spend coins")
 	var loaded=Progress.new(progress.path)
 	assert(loaded.data.equipped==1 and loaded.data.health==1 and loaded.data.coins==105)
 	start_run(0); assert(max_hp==120 and weapons[1]==1)
+	var initial_pos=hero.position
+	var touch=InputEventScreenTouch.new(); touch.index=0; touch.pressed=true; touch.position=Vector2(200,750); stick._input(touch)
+	var drag=InputEventScreenDrag.new(); drag.index=0; drag.position=Vector2(264,750); stick._input(drag)
+	assert(stick.value.x>0.9,"Touch drag must drive movement")
+	_process(.1); assert(hero.position.x>initial_pos.x,"Touch input must move the chicken")
+	touch.pressed=false; stick._input(touch); assert(stick.value==Vector2.ZERO,"Releasing touch must stop movement")
+	show_pause(); var frozen_time=elapsed; _process(1); assert(elapsed==frozen_time,"Pause must freeze combat")
+	resume_run(); assert(mode=="playing" and stick.value==Vector2.ZERO)
+	show_upgrades(); assert(mode=="upgrade"); var old_level=weapons[0]; apply_upgrade({"type":"weapon","id":0}); assert(weapons[0]==old_level+1); resume_run()
 	finish_run(true); assert(progress.data.unlocked==2)
 	start_run(1); finish_run(true); assert(progress.data.unlocked==3)
 	start_run(2); finish_run(true)
-	print("SMOKE_TEST_PASS: combat, defeat rewards, duplicate guard, purchases, save reload, equipment, permanent stats, unlocks, campaign completion")
+	print("SMOKE_TEST_PASS: combat, defeat rewards, duplicate guard, purchases, save reload, equipment, permanent stats, touch movement, pause, upgrades, unlocks, campaign completion")
 	get_tree().quit()
+
+func capture_frames():
+	await get_tree().process_frame
+	await RenderingServer.frame_post_draw
+	get_viewport().get_texture().get_image().save_png("res://builds/menu.png")
+	start_run(0)
+	for i in range(30): spawn_enemy(i%2)
+	for i in range(90): await get_tree().process_frame
+	mode="capture"
+	await RenderingServer.frame_post_draw
+	get_viewport().get_texture().get_image().save_png("res://builds/combat.png")
+	print("CAPTURE_DONE hero=",hero.global_position," cam=",cam.global_position," model=",hero_model.get_children())
+	get_tree().quit()
+
+func batch_scenery(parent: Node3D):
+	# Draw repeated static props in one call per mesh surface, preserving transforms.
+	var groups = {}
+	for mesh_node in parent.find_children("*", "MeshInstance3D", true, false):
+		if not mesh_node.visible: continue
+		var key = str(mesh_node.mesh.get_instance_id())
+		if not groups.has(key): groups[key] = {"mesh":mesh_node.mesh,"nodes":[]}
+		groups[key].nodes.append(mesh_node)
+	for group in groups.values():
+		if group.nodes.size()<3: continue
+		var mm = MultiMesh.new(); mm.transform_format=MultiMesh.TRANSFORM_3D; mm.mesh=group.mesh; mm.instance_count=group.nodes.size()
+		for i in range(group.nodes.size()):
+			var node: MeshInstance3D=group.nodes[i]
+			mm.set_instance_transform(i,parent.global_transform.affine_inverse()*node.global_transform)
+			node.visible=false
+		var instance=MultiMeshInstance3D.new(); instance.multimesh=mm; parent.add_child(instance)

@@ -9,7 +9,7 @@ scene=bpy.data.scenes.new('Cluck Asset Workshop')
 bpy.context.window.scene=scene
 M={}
 for name,col in {'cream':'f5e7c3','white':'fff6de','red':'c83232','orange':'efa331','black':'201e2a','brown':'78513b','wood':'8d6442','pink':'db8290','grey':'696476','dark':'343342','fox':'d66b2e','leaf':'627d39','hay':'d2aa51','barn':'b44c3c','blue':'44d5eb','green':'79914a'}.items():
-    m=bpy.data.materials.new('Cluck_'+name); m.diffuse_color=tuple(int(col[i:i+2],16)/255 for i in (0,2,4))+(1,); m.use_nodes=True
+    m=bpy.data.materials.new('Cluck_'+name); m.diffuse_color=tuple((int(col[i:i+2],16)/255)**2.2 for i in (0,2,4))+(1,); m.use_nodes=True
     m.node_tree.nodes['Principled BSDF'].inputs['Base Color'].default_value=m.diffuse_color
     m.node_tree.nodes['Principled BSDF'].inputs['Roughness'].default_value=.82
     M[name]=m
@@ -39,7 +39,7 @@ def export(name):
     for o in parts:o.select_set(True)
     bpy.context.view_layer.objects.active=parts[0];bpy.ops.object.join();o=bpy.context.object;o.name=name
     scene.cursor.location=(0,0,0);bpy.ops.object.origin_set(type='ORIGIN_CURSOR')
-    bpy.ops.export_scene.gltf(filepath=os.path.join(OUT,name+'.glb'),use_selection=True,export_format='GLB',export_yup=True)
+    bpy.ops.export_scene.gltf(filepath=os.path.join(OUT,name+'.glb'),use_selection=True,export_format='GLB',export_yup=True,use_active_scene=True)
     o.hide_set(True);parts=[]
 ball('Body',(0,0,.88),(.53,.5,.64),'cream');ball('Head',(0,-.19,1.48),(.46,.42,.45),'white')
 for side in [-1,1]:
